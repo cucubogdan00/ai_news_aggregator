@@ -4,14 +4,18 @@ import hashlib
 import sqlite3
 
 
+from database import init_db
+
+init_db()
+
 rss_sources = [
         "https://openai.com/news/rss.xml",
         "https://blog.google/technology/ai/rss/",
-        "https://www.anthropic.com/news/rss.xml",
+        "https://deepmind.google/blog/rss.xml",
         "https://huggingface.co/blog/feed.xml",
         "https://techcrunch.com/category/artificial-intelligence/feed/",
         "https://news.ycombinator.com/rss",
-        "https://news.mit.edu/rss/topic/artificial-intelligence",
+        "https://bair.berkeley.edu/blog/feed.xml",
         "https://paperswithcode.com/rss/latest",
         "https://thegradient.pub/rss/",
         "https://www.kdnuggets.com/feed",
