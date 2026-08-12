@@ -8,7 +8,7 @@ import time
 from dotenv import load_dotenv
 from database import init_db
 from transformers import pipeline
-from config import RSS_SOURCES, HEADERS
+from config import RSS_SOURCES, HEADERS, DB_NAME
 
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -21,7 +21,7 @@ def load_sentiment_analyzer():
 def fetch_and_analyze_articles(analyzer):
     new_articles = []
 
-    with sqlite3.connect('news.db') as connection:
+    with sqlite3.connect(DB_NAME) as connection:
         cursor = connection.cursor()
 
         for url in RSS_SOURCES:

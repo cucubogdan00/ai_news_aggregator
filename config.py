@@ -1,3 +1,5 @@
+DB_NAME = 'news.db'
+
 RSS_SOURCES = [
         "https://openai.com/news/rss.xml",
         "https://blog.google/technology/ai/rss/",
