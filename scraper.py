@@ -6,6 +6,7 @@ import os
 
 from dotenv import load_dotenv
 from database import init_db
+from transformers import pipeline
 
 load_dotenv()
 
@@ -13,6 +14,9 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 init_db()
+
+print('Loading sentiment analysis model...')
+sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert/distilbert-base-uncased-finetuned-sst-2-english")
 
 new_articles = []
 
@@ -51,21 +55,45 @@ for url in rss_sources:
                 print('Title: ' , entry.title)
                 print('Link: ', entry.link)
                 print('Published at: ', getattr(entry, 'published', 'N/A'))
+
+                sentiment_score = 0.0
+                try:
+                    analysis_result = sentiment_analyzer(entry.title[:512])[0]
+                    label = analysis_result['label']
+                    confidence = analysis_result['score']
+
+                    if label == 'NEGATIVE':
+                        sentiment_score = -float(confidence)
+                    else:
+                        sentiment_score = float(confidence)
+                except Exception as sentiment_error:
+                    print(f"Sentiment analysis error: {sentiment_error}")
+
+                print(f"Sentiment Score: {sentiment_score:.4f}")
                 print('-' * 40)
 
 
                 article_id = hashlib.sha256(entry.link.encode('utf-8')).hexdigest()
 
                 cursor.execute("""
-                    INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source)
-                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
-                    """, (article_id, entry.title, entry.link, getattr(entry, 'summary', 'N/A'), getattr(entry, 'published', 'N/A'), url))
+                    INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source, sentiment_score)
+                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)
+                    """, (
+                        article_id,
+                        entry.title, 
+                        entry.link, 
+                        getattr(entry, 'summary', 'N/A'), 
+                        getattr(entry, 'published', 'N/A'), 
+                        url,
+                        sentiment_score
+                    ))
 
                 if cursor.rowcount == 1:
                     new_articles.append(
                         {
                             'title' : entry.title,
-                            'link' : entry.link
+                            'link' : entry.link,
+                            'sentiment_score' : sentiment_score
                         }
                     )
 
@@ -84,12 +112,26 @@ if len(new_articles) > 0:
     print("Sending notifications to Telegram...")
 
     for article in new_articles:
-        message_text = f"🚨 New AI Article!\n\nTitle: {article['title']}\nLink: {article['link']}"
+        score = article.get('sentiment_score', 0.0)
 
+        if score >= 0.5:
+            sentiment_emoji = "🟢 Positive"
+        elif score <= -0.5:
+            sentiment_emoji = "🔴 Negative"
+        else:
+            sentiment_emoji = "⚪️ Neutral"
+
+        message_text = (
+            f"🚨 **New AI Article!**\n\n"
+            f"**Title:** {article['title']}\n"
+            f"**Sentiment:** {sentiment_emoji} (Score: {score:.2f})\n"
+            f"**Link:** {article['link']}"
+        )
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
             'chat_id': TELEGRAM_CHAT_ID,
-            'text': message_text
+            'text': message_text,
+            'parse_mode': 'Markdown'
         }
 
         try:
