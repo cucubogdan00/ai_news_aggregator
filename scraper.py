@@ -28,10 +28,11 @@ rss_sources = [
         "https://techcrunch.com/category/artificial-intelligence/feed/",
         "https://news.ycombinator.com/rss",
         "https://bair.berkeley.edu/blog/feed.xml",
-        "https://paperswithcode.com/rss/latest",
         "https://thegradient.pub/rss/",
+        "https://www.technologyreview.com/topic/artificial-intelligence/feed",
+        "https://www.marktechpost.com/feed/",
         "https://www.kdnuggets.com/feed",
-        "https://arstechnica.com/tag/ai/feed/",
+        "https://arstechnica.com/ai/feed/",
         "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
         "https://www.wired.com/feed/tag/ai/latest/rss",
         "https://venturebeat.com/category/ai/feed/"
