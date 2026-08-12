@@ -123,16 +123,16 @@ if len(new_articles) > 0:
             sentiment_emoji = "⚪️ Neutral"
 
         message_text = (
-            f"🚨 **New AI Article!**\n\n"
-            f"**Title:** {article['title']}\n"
-            f"**Sentiment:** {sentiment_emoji} (Score: {score:.2f})\n"
-            f"**Link:** {article['link']}"
+            f"🚨 <b>New AI Article!</b>\n\n"
+            f"<b>Title:</b> {article['title']}\n"
+            f"<b>Sentiment:</b> {sentiment_emoji} (Score: {score:.2f})\n"
+            f"<b>Link:</b> {article['link']}"
         )
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
             'chat_id': TELEGRAM_CHAT_ID,
             'text': message_text,
-            'parse_mode': 'Markdown'
+            'parse_mode': 'HTML'
         }
 
         try:
