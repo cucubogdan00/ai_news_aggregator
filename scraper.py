@@ -8,32 +8,11 @@ import time
 from dotenv import load_dotenv
 from database import init_db
 from transformers import pipeline
+from config import RSS_SOURCES, HEADERS
 
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-rss_sources = [
-        "https://openai.com/news/rss.xml",
-        "https://blog.google/technology/ai/rss/",
-        "https://deepmind.google/blog/rss.xml",
-        "https://huggingface.co/blog/feed.xml",
-        "https://techcrunch.com/category/artificial-intelligence/feed/",
-        "https://news.ycombinator.com/rss",
-        "https://bair.berkeley.edu/blog/feed.xml",
-        "https://thegradient.pub/rss/",
-        "https://www.technologyreview.com/topic/artificial-intelligence/feed",
-        "https://www.marktechpost.com/feed/",
-        "https://www.kdnuggets.com/feed",
-        "https://arstechnica.com/ai/feed/",
-        "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-        "https://www.wired.com/feed/tag/ai/latest/rss",
-        "https://venturebeat.com/category/ai/feed/"
-    ]
-
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
 
 def load_sentiment_analyzer():
     print('Loading sentiment analysis model...')
@@ -45,10 +24,10 @@ def fetch_and_analyze_articles(analyzer):
     with sqlite3.connect('news.db') as connection:
         cursor = connection.cursor()
 
-        for url in rss_sources:
+        for url in RSS_SOURCES:
             print(f'Fetching source: {url}')
             try:
-                response = requests.get(url, headers=headers, timeout=10)
+                response = requests.get(url, headers=HEADERS, timeout=10)
                 if response.status_code == 200:
                     feed = feedparser.parse(response.text)
                     
