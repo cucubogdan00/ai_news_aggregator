@@ -9,78 +9,100 @@ from dotenv import load_dotenv
 from database import init_db
 from transformers import pipeline
 from config import RSS_SOURCES, HEADERS, DB_NAME
+from abc import ABC, abstractmethod
 
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+class BaseScraper(ABC):
+
+    @abstractmethod
+    def scrape(self, url: str) -> list[dict]:
+        pass
+
+class RssScraper(BaseScraper):
+
+    def scrape(self, url: str) -> list[dict]:
+        print(f'Scraping RSS source: {url}')
+        articles = []
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=10)
+            if response.status_code == 200:
+                feed = feedparser.parse(response.text)
+                
+                for entry in feed.entries:
+                    articles.append({
+                        'title': entry.title,
+                        'link': entry.link,
+                        'summary': getattr(entry, 'summary', 'N/A'),
+                        'published': getattr(entry, 'published', 'N/A'),
+                        'source_url': url
+                    })
+            else:
+                print(f"Failed to fetch {url}, status code: {response.status_code}")
+        except Exception as e:
+            print(f"An error occurred while fetching {url}: {e}")
+            
+        return articles
+
 def load_sentiment_analyzer():
     print('Loading sentiment analysis model...')
     return pipeline("sentiment-analysis", model="distilbert/distilbert-base-uncased-finetuned-sst-2-english")
 
-def fetch_and_analyze_articles(analyzer):
+def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> list:
     new_articles = []
 
     with sqlite3.connect(DB_NAME) as connection:
         cursor = connection.cursor()
 
-        for url in RSS_SOURCES:
-            print(f'Fetching source: {url}')
-            try:
-                response = requests.get(url, headers=HEADERS, timeout=10)
-                if response.status_code == 200:
-                    feed = feedparser.parse(response.text)
-                    
-                    for entry in feed.entries:
-                        print('Title: ' , entry.title)
-                        print('Link: ', entry.link)
-                        print('Published at: ', getattr(entry, 'published', 'N/A'))
+        for url in urls:
+            raw_data = scraper.scrape(url)
+            for article in raw_data:
+                print(f"Title: {article['title']}")
+                print(f"Link: {article['link']}")
+                print(f"Published at: {article['published']}")
 
-                        sentiment_score = 0.0
-                        try:
-                            analysis_result = analyzer(entry.title[:512])[0]
-                            label = analysis_result['label']
-                            confidence = analysis_result['score']
-                            sentiment_score = -float(confidence) if label == 'NEGATIVE' else float(confidence)
-                        except Exception as sentiment_error:
-                            print(f"Sentiment analysis error: {sentiment_error}")
+                sentiment_score = 0.0
+                try:
+                    analysis_result = analyzer(article['title'][:512])[0]
+                    label = analysis_result['label']
+                    confidence = analysis_result['score']
+                    sentiment_score = -float(confidence) if label == 'NEGATIVE' else float(confidence)
+                except Exception as sentiment_error:
+                    print(f"Sentiment analysis error: {sentiment_error}")
 
-                        print(f"Sentiment Score: {sentiment_score:.4f}")
-                        print('-' * 40)
+                print(f"Sentiment Score: {sentiment_score:.4f}")
+                print('-' * 40)
 
 
-                        article_id = hashlib.sha256(entry.link.encode('utf-8')).hexdigest()
+                article_id = hashlib.sha256(article['link'].encode('utf-8')).hexdigest()
 
-                        cursor.execute("""
-                            INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source, sentiment_score)
-                            VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)
-                            """, (
-                                article_id,
-                                entry.title, 
-                                entry.link, 
-                                getattr(entry, 'summary', 'N/A'), 
-                                getattr(entry, 'published', 'N/A'), 
-                                url,
-                                sentiment_score
-                            ))
+                cursor.execute("""
+                    INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source, sentiment_score)
+                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)
+                    """, (
+                        article_id,
+                        article['title'], 
+                        article['link'], 
+                        article['summary'], 
+                        article['published'], 
+                        article['source_url'],
+                        sentiment_score
+                    ))
 
-                        if cursor.rowcount == 1:
-                            new_articles.append(
-                                {
-                                    'title' : entry.title,
-                                    'link' : entry.link,
-                                    'sentiment_score' : sentiment_score
-                                }
-                            )
+                if cursor.rowcount == 1:
+                    new_articles.append(
+                        {
+                            'title' : article['title'],
+                            'link' : article['link'],
+                            'sentiment_score' : sentiment_score
+                        }
+                    )
 
-                    connection.commit()   
-                else:
-                    print(f"Failed to fetch {url}, status code: {response.status_code}")
-
-            except Exception as e:
-                print(f"An error occurred while fetching {url}: {e}")
-
-        return new_articles
+            connection.commit()   
+       
+    return new_articles
 
 def send_telegram_notifications(articles):
     if not articles:
@@ -92,12 +114,7 @@ def send_telegram_notifications(articles):
     for article in articles:
         score = article.get('sentiment_score', 0.0)
 
-        if score >= 0.5:
-            sentiment_emoji = "🟢 Positive"
-        elif score <= -0.5:
-            sentiment_emoji = "🔴 Negative"
-        else:
-            sentiment_emoji = "⚪️ Neutral"
+        sentiment_emoji = "🟢 Positive" if score >= 0.5 else "🔴 Negative" if score <= -0.5 else "⚪️ Neutral"
 
         message_text = (
             f"🚨 <b>New AI Article!</b>\n\n"
@@ -125,7 +142,9 @@ def main():
     init_db()
     analyzer = load_sentiment_analyzer()
 
-    new_articles = fetch_and_analyze_articles(analyzer)
+    current_scraper = RssScraper()
+
+    new_articles = process_and_save_articles(current_scraper, RSS_SOURCES, analyzer)
     print(f"Scraping finished. Found {len(new_articles)} new articles.")
 
     send_telegram_notifications(new_articles)
