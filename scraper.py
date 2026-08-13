@@ -30,11 +30,18 @@ class RssScraper(BaseScraper):
             response = requests.get(url, headers=HEADERS, timeout=10)
             if response.status_code == 200:
                 feed = feedparser.parse(response.text)
-                
+
                 for entry in feed.entries:
+                    title = getattr(entry, 'title', None)
+                    link = getattr(entry, 'link', None)
+
+                    if not title or not link:
+                        print(f"Skipping an invalid entry in {url}: missing title or link.")
+                        continue
+
                     articles.append({
-                        'title': entry.title,
-                        'link': entry.link,
+                        'title': title.strip(),
+                        'link': link.strip(),
                         'summary': getattr(entry, 'summary', 'N/A'),
                         'published': getattr(entry, 'published', 'N/A'),
                         'source_url': url
