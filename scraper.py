@@ -4,12 +4,19 @@ import hashlib
 import sqlite3
 import os
 import time 
+import logging
 
 from dotenv import load_dotenv
 from database import init_db
 from transformers import pipeline
 from config import RSS_SOURCES, HEADERS, DB_NAME
 from abc import ABC, abstractmethod
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -24,7 +31,7 @@ class BaseScraper(ABC):
 class RssScraper(BaseScraper):
 
     def scrape(self, url: str) -> list[dict]:
-        print(f'Scraping RSS source: {url}')
+        logging.info(f'Scraping RSS source: {url}')
         articles = []
         try:
             response = requests.get(url, headers=HEADERS, timeout=10)
@@ -36,7 +43,7 @@ class RssScraper(BaseScraper):
                     link = getattr(entry, 'link', None)
 
                     if not title or not link:
-                        print(f"Skipping an invalid entry in {url}: missing title or link.")
+                        logging.warning(f"Skipping an invalid entry in {url}: missing title or link.")
                         continue
 
                     articles.append({
@@ -47,14 +54,14 @@ class RssScraper(BaseScraper):
                         'source_url': url
                     })
             else:
-                print(f"Failed to fetch {url}, status code: {response.status_code}")
+                logging.error(f"Failed to fetch {url}, status code: {response.status_code}")
         except Exception as e:
-            print(f"An error occurred while fetching {url}: {e}")
+            logging.error(f"An error occurred while fetching {url}: {e}")
             
         return articles
 
 def load_sentiment_analyzer():
-    print('Loading sentiment analysis model...')
+    logging.info('Loading sentiment analysis model...')
     return pipeline("sentiment-analysis", model="distilbert/distilbert-base-uncased-finetuned-sst-2-english")
 
 def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> list:
@@ -66,10 +73,6 @@ def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> li
         for url in urls:
             raw_data = scraper.scrape(url)
             for article in raw_data:
-                print(f"Title: {article['title']}")
-                print(f"Link: {article['link']}")
-                print(f"Published at: {article['published']}")
-
                 sentiment_score = 0.0
                 try:
                     analysis_result = analyzer(article['title'][:512])[0]
@@ -77,11 +80,7 @@ def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> li
                     confidence = analysis_result['score']
                     sentiment_score = -float(confidence) if label == 'NEGATIVE' else float(confidence)
                 except Exception as sentiment_error:
-                    print(f"Sentiment analysis error: {sentiment_error}")
-
-                print(f"Sentiment Score: {sentiment_score:.4f}")
-                print('-' * 40)
-
+                    logging.error(f"Sentiment analysis error: {sentiment_error}")
 
                 article_id = hashlib.sha256(article['link'].encode('utf-8')).hexdigest()
 
@@ -99,6 +98,7 @@ def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> li
                     ))
 
                 if cursor.rowcount == 1:
+                    logging.info(f"New article saved: {article['title'][:50]}... (Score: {sentiment_score:.4f})")
                     new_articles.append(
                         {
                             'title' : article['title'],
@@ -115,7 +115,7 @@ def send_telegram_notifications(articles):
     if not articles:
         return
 
-    print("Sending notifications to Telegram...")
+    logging.info("Sending notifications to Telegram...")
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
     for article in articles:
@@ -139,9 +139,9 @@ def send_telegram_notifications(articles):
         try:
             telegram_response = requests.post(url, json=payload)
             if telegram_response.status_code != 200:
-                print(f"Failed to send message: {telegram_response.text}")
+                logging.error(f"Failed to send message: {telegram_response.text}")
         except Exception as e:
-            print(f"Error sending to Telegram: {e}")
+            logging.error(f"Error sending to Telegram: {e}")
 
         time.sleep(1.5)
 
@@ -152,10 +152,10 @@ def main():
     current_scraper = RssScraper()
 
     new_articles = process_and_save_articles(current_scraper, RSS_SOURCES, analyzer)
-    print(f"Scraping finished. Found {len(new_articles)} new articles.")
+    logging.info(f"Scraping finished. Found {len(new_articles)} new articles.")
 
     send_telegram_notifications(new_articles)
-    print("Process completed successfully.")
+    logging.info("Process completed successfully.")
 
 if __name__ == "__main__":
     main()
