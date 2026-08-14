@@ -115,7 +115,7 @@ def send_telegram_notifications(articles):
     if not articles:
         return
 
-    logging.info("Sending notifications to Telegram...")
+    logging.info(f"Sending {len(articles)} notifications to Telegram...")
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
     for article in articles:
@@ -127,13 +127,25 @@ def send_telegram_notifications(articles):
             f"🚨 <b>New AI Article!</b>\n\n"
             f"<b>Title:</b> {article['title']}\n"
             f"<b>Sentiment:</b> {sentiment_emoji} (Score: {score:.2f})\n"
-            f"<b>Link:</b> {article['link']}"
         )
+
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text" : "🔗 Read Full Article",
+                        "url" : article['link']
+                    }
+                ]
+            ]
+        }
+
 
         payload = {
             'chat_id': TELEGRAM_CHAT_ID,
             'text': message_text,
-            'parse_mode': 'HTML'
+            'parse_mode': 'HTML',
+            'reply_markup' : reply_markup
         }
 
         try:
