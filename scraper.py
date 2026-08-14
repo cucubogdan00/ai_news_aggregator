@@ -5,6 +5,7 @@ import sqlite3
 import os
 import time 
 import logging
+import re
 
 from dotenv import load_dotenv
 from database import init_db
@@ -46,12 +47,17 @@ class RssScraper(BaseScraper):
                         logging.warning(f"Skipping an invalid entry in {url}: missing title or link.")
                         continue
 
+                    raw_tags = getattr(entry, 'tags', [])
+                    tags_list = [tag.get('term', '') for tag in raw_tags if tag.get('term')]
+                    tags_str = ", ".join(tags_list[:3]) if tags_list else "AI News"
+
                     articles.append({
                         'title': title.strip(),
                         'link': link.strip(),
                         'summary': getattr(entry, 'summary', 'N/A'),
                         'published': getattr(entry, 'published', 'N/A'),
-                        'source_url': url
+                        'source_url': url,
+                        'tags' : tags_str
                     })
             else:
                 logging.error(f"Failed to fetch {url}, status code: {response.status_code}")
@@ -85,8 +91,8 @@ def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> li
                 article_id = hashlib.sha256(article['link'].encode('utf-8')).hexdigest()
 
                 cursor.execute("""
-                    INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source, sentiment_score)
-                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)
+                    INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source, sentiment_score, tags)
+                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
                     """, (
                         article_id,
                         article['title'], 
@@ -94,7 +100,8 @@ def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> li
                         article['summary'], 
                         article['published'], 
                         article['source_url'],
-                        sentiment_score
+                        sentiment_score,
+                        article['tags']
                     ))
 
                 if cursor.rowcount == 1:
@@ -103,7 +110,8 @@ def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> li
                         {
                             'title' : article['title'],
                             'link' : article['link'],
-                            'sentiment_score' : sentiment_score
+                            'sentiment_score' : sentiment_score,
+                            'tags' : article['tags']
                         }
                     )
 
@@ -120,13 +128,16 @@ def send_telegram_notifications(articles):
 
     for article in articles:
         score = article.get('sentiment_score', 0.0)
-
         sentiment_emoji = "🟢 Positive" if score >= 0.5 else "🔴 Negative" if score <= -0.5 else "⚪️ Neutral"
+
+        raw_tags = article.get('tags', 'AINews').split(',')
+        formatted_hashtags = " ".join([f"#{re.sub(r'[^a-zA-Z0-9]', '', tag.title())}" for tag in raw_tags if tag.strip()])
 
         message_text = (
             f"🚨 <b>New AI Article!</b>\n\n"
             f"<b>Title:</b> {article['title']}\n"
             f"<b>Sentiment:</b> {sentiment_emoji} (Score: {score:.2f})\n"
+            f"<i>{formatted_hashtags}</i>"
         )
 
         reply_markup = {

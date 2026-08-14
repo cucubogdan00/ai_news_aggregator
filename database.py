@@ -16,9 +16,16 @@ def init_db():
                 published_at TEXT,
                 created_at TEXT,
                 source TEXT,
-                sentiment_score REAL
+                sentiment_score REAL,
+                tags TEXT
                 )       
             """)
+
+        try:
+            cursor.execute("ALTER TABLE articles ADD COLUMN tags TEXT DEFAULT 'AI News'")
+        except sqlite3.OperationalError:
+            pass
+        
         connection.commit()
         
 
