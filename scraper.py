@@ -80,6 +80,7 @@ def load_sentiment_analyzer():
     logging.info('Loading sentiment analysis model...')
     return pipeline("sentiment-analysis", model="distilbert/distilbert-base-uncased-finetuned-sst-2-english")
 
+# Step 1: EXTRACT
 def fetch_all_articles_concurrently(scraper : BaseScraper, urls: list[str], max_workers: int = 5) -> list[dict]:
     all_raw_articles = []
     logging.info(f"Starting concurrent scraping across {len(urls)} sources with {max_workers} workers...")
@@ -97,48 +98,57 @@ def fetch_all_articles_concurrently(scraper : BaseScraper, urls: list[str], max_
     logging.info(f"Finished fetching feeds. Collected a total of {len(all_raw_articles)} raw entries.")
     return all_raw_articles
 
-def process_and_save_articles(raw_data: list[dict], analyzer) -> list[dict]:
+# Step 2: TRANSFORM
+def enrich_with_sentiment(raw_data: list[dict], analyzer) -> list[dict]:
+    logging.info("Starting sentiment analysis transformation...")
+    enriched_articles = []
+
+    for article in raw_data:
+        sentiment_score = 0.0
+        try:
+            analysis_result = analyzer(article['title'][:512])[0]
+            label = analysis_result['label']
+            confidence = analysis_result['score']
+            sentiment_score = -float(confidence) if label == 'NEGATIVE' else float(confidence)
+        except Exception as sentiment_error:
+            logging.error(f"Sentiment analysis error: {sentiment_error}")
+
+        article_id = hashlib.sha256(article['link'].encode('utf-8')).hexdigest()
+
+        enriched_article = article.copy()
+        enriched_article['id'] = article_id
+        enriched_article['sentiment_score'] = sentiment_score
+
+        enriched_articles.append(enriched_article)
+
+    return enriched_articles
+
+# Step 3: LOAD
+def save_to_database(enriched_data: list[dict]) -> list[dict]:
+    logging.info("Starting database load process...")
     new_articles = []
 
     with sqlite3.connect(DB_NAME) as connection:
         cursor = connection.cursor()
 
-        for article in raw_data:
-            sentiment_score = 0.0
-            try:
-                analysis_result = analyzer(article['title'][:512])[0]
-                label = analysis_result['label']
-                confidence = analysis_result['score']
-                sentiment_score = -float(confidence) if label == 'NEGATIVE' else float(confidence)
-            except Exception as sentiment_error:
-                logging.error(f"Sentiment analysis error: {sentiment_error}")
-
-            article_id = hashlib.sha256(article['link'].encode('utf-8')).hexdigest()
-
+        for article in enriched_data:
             cursor.execute("""
                 INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source, sentiment_score, tags)
                 VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
                 """, (
-                    article_id,
+                    article['id'],
                     article['title'], 
                     article['link'], 
                     article['summary'], 
                     article['published'], 
                     article['source_url'],
-                    sentiment_score,
+                    article['sentiment_score'],
                     article['tags']
                 ))
 
             if cursor.rowcount == 1:
-                logging.info(f"New article saved: {article['title'][:50]}... (Score: {sentiment_score:.4f})")
-                new_articles.append(
-                    {
-                        'title' : article['title'],
-                        'link' : article['link'],
-                        'sentiment_score' : sentiment_score,
-                        'tags' : article['tags']
-                    }
-                )
+                logging.info(f"New article saved: {article['title'][:50]}... (Score: {article['sentiment_score']:.4f})")
+                new_articles.append(article)
 
         connection.commit()   
     
@@ -196,14 +206,14 @@ def send_telegram_notifications(articles):
 def main():
     init_db()
     analyzer = load_sentiment_analyzer()
-
     current_scraper = RssScraper()
 
-    raw_articles = fetch_all_articles_concurrently(current_scraper, RSS_SOURCES, max_workers=5)
+    # E.T.L Architecture
+    raw_articles = fetch_all_articles_concurrently(current_scraper, RSS_SOURCES, max_workers=5) # EXTRACT
+    enriched_articles = enrich_with_sentiment(raw_articles, analyzer)                           # TRANSFORM
+    new_articles = save_to_database(enriched_articles)                                          # LOAD
 
-    new_articles = process_and_save_articles(raw_articles, analyzer)
     logging.info(f"Scraping finished. Found {len(new_articles)} new articles.")
-
     send_telegram_notifications(new_articles)
     logging.info("Process completed successfully.")
 
