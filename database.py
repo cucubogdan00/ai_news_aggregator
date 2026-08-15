@@ -7,6 +7,9 @@ def init_db():
     with sqlite3.connect(DB_NAME) as connection:
         cursor = connection.cursor()
 
+        # Write-Ahead Logging
+        cursor.execute("PRAGMA journal_mode=WAL;")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS articles(
                 id TEXT PRIMARY KEY,
