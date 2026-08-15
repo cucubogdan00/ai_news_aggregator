@@ -12,6 +12,7 @@ from database import init_db
 from transformers import pipeline
 from config import RSS_SOURCES, HEADERS, DB_NAME
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,53 +71,68 @@ def load_sentiment_analyzer():
     logging.info('Loading sentiment analysis model...')
     return pipeline("sentiment-analysis", model="distilbert/distilbert-base-uncased-finetuned-sst-2-english")
 
-def process_and_save_articles(scraper : BaseScraper, urls: list, analyzer) -> list:
+def fetch_all_articles_concurrently(scraper : BaseScraper, urls: list[str], max_workers: int = 5) -> list[dict]:
+    all_raw_articles = []
+    logging.info(f"Starting concurrent scraping across {len(urls)} sources with {max_workers} workers...")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_url = {executor.submit(scraper.scrape, url): url for url in urls}
+        for future in as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                articles = future.result()
+                all_raw_articles.extend(articles)
+            except Exception as e:
+                logging.error(f"Error scraping {url} in thread: {e}")
+
+    logging.info(f"Finished fetching feeds. Collected a total of {len(all_raw_articles)} raw entries.")
+    return all_raw_articles
+
+def process_and_save_articles(raw_data: list[dict], analyzer) -> list[dict]:
     new_articles = []
 
     with sqlite3.connect(DB_NAME) as connection:
         cursor = connection.cursor()
 
-        for url in urls:
-            raw_data = scraper.scrape(url)
-            for article in raw_data:
-                sentiment_score = 0.0
-                try:
-                    analysis_result = analyzer(article['title'][:512])[0]
-                    label = analysis_result['label']
-                    confidence = analysis_result['score']
-                    sentiment_score = -float(confidence) if label == 'NEGATIVE' else float(confidence)
-                except Exception as sentiment_error:
-                    logging.error(f"Sentiment analysis error: {sentiment_error}")
+        for article in raw_data:
+            sentiment_score = 0.0
+            try:
+                analysis_result = analyzer(article['title'][:512])[0]
+                label = analysis_result['label']
+                confidence = analysis_result['score']
+                sentiment_score = -float(confidence) if label == 'NEGATIVE' else float(confidence)
+            except Exception as sentiment_error:
+                logging.error(f"Sentiment analysis error: {sentiment_error}")
 
-                article_id = hashlib.sha256(article['link'].encode('utf-8')).hexdigest()
+            article_id = hashlib.sha256(article['link'].encode('utf-8')).hexdigest()
 
-                cursor.execute("""
-                    INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source, sentiment_score, tags)
-                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
-                    """, (
-                        article_id,
-                        article['title'], 
-                        article['link'], 
-                        article['summary'], 
-                        article['published'], 
-                        article['source_url'],
-                        sentiment_score,
-                        article['tags']
-                    ))
+            cursor.execute("""
+                INSERT OR IGNORE INTO articles (id, title, link, summary, published_at, created_at, source, sentiment_score, tags)
+                VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+                """, (
+                    article_id,
+                    article['title'], 
+                    article['link'], 
+                    article['summary'], 
+                    article['published'], 
+                    article['source_url'],
+                    sentiment_score,
+                    article['tags']
+                ))
 
-                if cursor.rowcount == 1:
-                    logging.info(f"New article saved: {article['title'][:50]}... (Score: {sentiment_score:.4f})")
-                    new_articles.append(
-                        {
-                            'title' : article['title'],
-                            'link' : article['link'],
-                            'sentiment_score' : sentiment_score,
-                            'tags' : article['tags']
-                        }
-                    )
+            if cursor.rowcount == 1:
+                logging.info(f"New article saved: {article['title'][:50]}... (Score: {sentiment_score:.4f})")
+                new_articles.append(
+                    {
+                        'title' : article['title'],
+                        'link' : article['link'],
+                        'sentiment_score' : sentiment_score,
+                        'tags' : article['tags']
+                    }
+                )
 
-            connection.commit()   
-       
+        connection.commit()   
+    
     return new_articles
 
 def send_telegram_notifications(articles):
@@ -174,7 +190,9 @@ def main():
 
     current_scraper = RssScraper()
 
-    new_articles = process_and_save_articles(current_scraper, RSS_SOURCES, analyzer)
+    raw_articles = fetch_all_articles_concurrently(current_scraper, RSS_SOURCES, max_workers=5)
+
+    new_articles = process_and_save_articles(raw_articles, analyzer)
     logging.info(f"Scraping finished. Found {len(new_articles)} new articles.")
 
     send_telegram_notifications(new_articles)
