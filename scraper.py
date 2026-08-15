@@ -6,11 +6,12 @@ import os
 import time 
 import logging
 import re
+import random
 
 from dotenv import load_dotenv
 from database import init_db
 from transformers import pipeline
-from config import RSS_SOURCES, HEADERS, DB_NAME
+from config import RSS_SOURCES, USER_AGENTS, DB_NAME
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -33,11 +34,16 @@ class BaseScraper(ABC):
 class RssScraper(BaseScraper):
 
     def scrape(self, url: str) -> list[dict]:
-        logging.info(f'Scraping RSS source: {url}')
         articles = []
-        try:
-            response = requests.get(url, headers=HEADERS, timeout=10)
-            if response.status_code == 200:
+        max_retries = 3
+
+        for attempt in range(max_retries):
+            headers = {"User-Agent": random.choice(USER_AGENTS)}
+
+            try:
+                response = requests.get(url, headers=headers, timeout=15)
+                response.raise_for_status()
+
                 feed = feedparser.parse(response.text)
 
                 for entry in feed.entries:
@@ -45,7 +51,6 @@ class RssScraper(BaseScraper):
                     link = getattr(entry, 'link', None)
 
                     if not title or not link:
-                        logging.warning(f"Skipping an invalid entry in {url}: missing title or link.")
                         continue
 
                     raw_tags = getattr(entry, 'tags', [])
@@ -60,11 +65,15 @@ class RssScraper(BaseScraper):
                         'source_url': url,
                         'tags' : tags_str
                     })
-            else:
-                logging.error(f"Failed to fetch {url}, status code: {response.status_code}")
-        except Exception as e:
-            logging.error(f"An error occurred while fetching {url}: {e}")
-            
+                break
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logging.warning(f"Attempt {attempt + 1} failed for {url}. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    logging.error(f"Failed to fetch {url} after {max_retries} attempts: {e}")
+
         return articles
 
 def load_sentiment_analyzer():
