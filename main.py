@@ -9,9 +9,9 @@ import re
 import random
 
 from dotenv import load_dotenv
-from database import init_db
+from database.db_manager import init_db
 from transformers import pipeline
-from config import RSS_SOURCES, USER_AGENTS, DB_NAME
+from config.settings import RSS_SOURCES, USER_AGENTS, DB_NAME
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 

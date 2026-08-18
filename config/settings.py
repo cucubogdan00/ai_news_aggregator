@@ -1,4 +1,7 @@
-DB_NAME = 'news.db'
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_NAME = os.path.join(BASE_DIR, 'data', 'news.db') 
 
 RSS_SOURCES = [
         "https://openai.com/news/rss.xml",

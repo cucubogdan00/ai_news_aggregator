@@ -56,7 +56,7 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 
 ### 5. 🕹️ Usage
 ```bash
-python scraper.py
+python main.py
 ```
 
 --- 
